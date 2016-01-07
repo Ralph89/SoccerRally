@@ -8,8 +8,8 @@ using UnityEngine.EventSystems;
 public class Ball : Photon.MonoBehaviour {
 
     [Header("Sync Options")]
-    [SerializeField] private bool StateInterpolation = true;   // always behind
-    [SerializeField] private bool syncRigidbody;        // syning the rigidbody values
+    [SerializeField] private bool StateInterpolation = false;   // always behind
+    [SerializeField] private bool syncRigidbody = false;        // syning the rigidbody values
 
     //state sync
     public class NetworkState
@@ -47,6 +47,7 @@ public class Ball : Photon.MonoBehaviour {
     private bool firstFrame = true;
     private bool offToMuch;
     private Vector3 offBy;
+    UIManager uiManager;
 
     void Awake()
     {
@@ -54,12 +55,13 @@ public class Ball : Photon.MonoBehaviour {
         cachedTF = transform;
         if (!PhotonNetwork.isMasterClient)
             cachedRB.isKinematic = true;
+
     }
     
     void Start()
     {
         //find the uimanager to register the functions to the button
-        UIManager uiManager = FindObjectOfType<UIManager>();
+        uiManager = FindObjectOfType<UIManager>();
         if (uiManager != null)
         {
             uiManager.rigidbodySyncButton.onClick.AddListener(EnableRigidbodySync);
@@ -70,8 +72,10 @@ public class Ball : Photon.MonoBehaviour {
             uiManager.upInput.onClick.AddListener(ClickUpBtn);
             uiManager.rightInput.onClick.AddListener(ClickRightBtn);
             uiManager.leftInput.onClick.AddListener(ClickLeftBtn);
+            uiManager.resetBtn.onClick.AddListener(ResetBall);
             #endif
         }
+        EnableRigidbodySync();
     }
 
     void Update()
@@ -84,6 +88,11 @@ public class Ball : Photon.MonoBehaviour {
             if (StateInterpolation)
                 StateSyncInterpolate();
         }
+    }
+
+    void OnDestroy()
+    {
+        PhotonNetwork.LeaveRoom();
     }
 
     public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
@@ -155,6 +164,145 @@ public class Ball : Photon.MonoBehaviour {
                 Debug.Log("State inconsistent");
     }
 
+    void StateSyncInterpolate()
+    {
+        //state sync way
+        float ping = (float)PhotonNetwork.GetPing() * 0.001f; // ping in seconds
+        double currentTime = PhotonNetwork.time;
+        //interpolation we get the ping back as an in to make it to ms again.
+        double interpolationTime = currentTime - .15f;
+        // We have a window of interpolation time that we play
+        //By having networkdelay the average ping, you will usually use interpolation
+        //And only if no more data arrives will we use extrapolation
+        //Use interpolation
+        //Check if latest state exceeds interpolation time
+        //If this is the case then it is too old and extrapolation should be used
+
+        //when the state time is higher then our interpolation time
+        if (m_TimestampCount > 0 && states[0].time > interpolationTime)
+        {
+            for (int i = 0; i < m_TimestampCount; i++)
+            {
+                //Find a state that matches the interpolation time (time+.1) or use the last state
+                if (states[i].time <= interpolationTime || i == m_TimestampCount - 1)
+                {
+                    //The state one slot newer (<100ms) than the best playback time
+                    NetworkState rhs = states[Mathf.Max(i - 1, 0)];
+                    //The best playback state (closest to 100ms old (default time))
+                    NetworkState lhs = states[i];
+
+                    //Use the time between the two slots to determine if interpolation is necessary
+                    double length = rhs.time - lhs.time;
+                    float t = 0;
+
+                    //As the time gets closer to 100ms, t gets closer to 1 in which case only rhs is used
+                    if (length > 0.0001)
+                    {
+                        t = (float)((interpolationTime - lhs.time) / length);
+                        // Debug.Log(t);
+                    }
+                    //distance check
+                    //ship.cachedRB.AddRelativeForce(Vector3.forward * states[0].speed);
+                    cachedTF.position = Vector3.Lerp(lhs.pos, rhs.pos, t);
+                    cachedTF.rotation = Quaternion.Slerp(lhs.rot, rhs.rot, t);
+                    return;
+                }
+            }
+        }
+        else if (m_TimestampCount > 1)
+        {
+            Debug.Log("extra");
+            double extrapolationLength = (interpolationTime - states[0].time);
+            if (extrapolationLength < 1)
+            {
+                cachedTF.position = states[0].pos + (states[0].rigidBodyVel * (float)extrapolationLength);
+                cachedTF.rotation = states[0].rot;
+            }
+        }
+    }
+
+    void ResetBall()
+    {
+        cachedRB.velocity = Vector3.zero;
+        cachedTF.position = new Vector3(0, 5, 0);
+    }
+
+    [PunRPC]
+    void ApplyBallForce(Vector3 force)
+    {
+        cachedRB.AddForce(force);
+    }
+
+    void SetForce(float value)
+    {
+        force = value * 100;
+    }
+
+    #region Helper functions
+    void EnableStateInterpolation()
+    {
+        StateInterpolation = true;
+        syncRigidbody = false;
+        cachedRB.isKinematic = true;
+        uiManager.rigidbodySyncButton.image.color = Color.white;
+        uiManager.stateInterpolateButton.image.color = Color.red;
+    }
+
+    void EnableRigidbodySync()
+    {
+        StateInterpolation = false;
+        syncRigidbody = true;
+        if (cachedRB.isKinematic)
+            cachedRB.isKinematic = false;
+        uiManager.rigidbodySyncButton.image.color = Color.red;
+        uiManager.stateInterpolateButton.image.color = Color.white;
+
+    }
+    #endregion 
+
+    #region temp for input should be in inputmanager but still a test project, kinda lazy
+    void KeyBoardInput()
+    {
+        if (Input.GetKeyDown(KeyCode.DownArrow))
+        {
+            photonView.RPC("ApplyBallForce", PhotonTargets.MasterClient, Vector3.down * force);
+        }
+        else if (Input.GetKeyDown(KeyCode.UpArrow))
+        {
+            photonView.RPC("ApplyBallForce", PhotonTargets.MasterClient, Vector3.up * force);
+        }
+        else if (Input.GetKeyDown(KeyCode.LeftArrow))
+        {
+            photonView.RPC("ApplyBallForce", PhotonTargets.MasterClient, Vector3.left * force);
+        }
+        else if (Input.GetKeyDown(KeyCode.RightArrow))
+        {
+            photonView.RPC("ApplyBallForce", PhotonTargets.MasterClient, Vector3.right * force);
+        }
+        else if (Input.GetKeyDown(KeyCode.Space) && PhotonNetwork.isMasterClient)
+        {
+            ResetBall();
+        }
+    }
+
+    void ClickUpBtn()
+    {
+        photonView.RPC("ApplyBallForce", PhotonTargets.MasterClient, Vector3.up * force);
+    }
+
+    void ClickRightBtn()
+    {
+        photonView.RPC("ApplyBallForce", PhotonTargets.MasterClient, Vector3.right * force);
+    }
+
+    void ClickLeftBtn()
+    {
+        photonView.RPC("ApplyBallForce", PhotonTargets.MasterClient, Vector3.left * force);
+    }
+
+    #endregion
+
+    #region predictions
     void Predict()
     {
         double serverTime = PhotonNetwork.time;
@@ -163,7 +311,7 @@ public class Ball : Photon.MonoBehaviour {
         Vector3 lastPos = lastPredictionState.pos;
         float t = 0;
         if (timeSinceLastPacket > 0)
-            t = ( (float)timeSinceLastPacket / Time.fixedDeltaTime);
+            t = ((float)timeSinceLastPacket / Time.fixedDeltaTime);
         //Debug.Log((float)timeSinceLastPacket);
         Vector3 curPos = lastPos + (lastPredictionState.rigidBodyVel * (float)timeSinceLastPacket);
 
@@ -179,7 +327,7 @@ public class Ball : Photon.MonoBehaviour {
         //1st is latest
         //2nd is prev
         double serverTime = PhotonNetwork.time;
-        
+
         float timeSinceLastPacket;
         float timeSinceLastUpdate;
         float timePrevPacket;
@@ -233,137 +381,6 @@ public class Ball : Photon.MonoBehaviour {
         cachedRB.rotation = lastPredictionState.rot;
 
     }
+    #endregion
 
-    void StateSyncInterpolate()
-    {
-        //state sync way
-        float ping = (float)PhotonNetwork.GetPing() * 0.001f; // ping in seconds
-        double currentTime = PhotonNetwork.time;
-        //interpolation we get the ping back as an in to make it to ms again.
-        double interpolationTime = currentTime - .1f;
-        // We have a window of interpolation time that we play
-        //By having networkdelay the average ping, you will usually use interpolation
-        //And only if no more data arrives will we use extrapolation
-        //Use interpolation
-        //Check if latest state exceeds interpolation time
-        //If this is the case then it is too old and extrapolation should be used
-
-        //when the state time is higher then our interpolation time
-        if (m_TimestampCount > 0 && states[0].time > interpolationTime)
-        {
-            for (int i = 0; i < m_TimestampCount; i++)
-            {
-                //Find a state that matches the interpolation time (time+.1) or use the last state
-                if (states[i].time <= interpolationTime || i == m_TimestampCount - 1)
-                {
-                    //The state one slot newer (<100ms) than the best playback time
-                    NetworkState rhs = states[Mathf.Max(i - 1, 0)];
-                    //The best playback state (closest to 100ms old (default time))
-                    NetworkState lhs = states[i];
-
-                    //Use the time between the two slots to determine if interpolation is necessary
-                    double length = rhs.time - lhs.time;
-                    float t = 0;
-
-                    //As the time gets closer to 100ms, t gets closer to 1 in which case only rhs is used
-                    if (length > 0.0001)
-                    {
-                        t = (float)((interpolationTime - lhs.time) / length);
-                        // Debug.Log(t);
-                    }
-                    //distance check
-                    //ship.cachedRB.AddRelativeForce(Vector3.forward * states[0].speed);
-                    cachedTF.position = Vector3.Lerp(lhs.pos, rhs.pos, t);
-                    cachedTF.rotation = Quaternion.Slerp(lhs.rot, rhs.rot, t);
-                    return;
-                }
-            }
-        }
-        else if (m_TimestampCount > 1)
-        {
-            double extrapolationLength = (interpolationTime - states[0].time);
-            if (extrapolationLength < 1)
-            {
-                cachedTF.position = states[0].pos + (states[0].rigidBodyVel * (float)extrapolationLength);
-                cachedTF.rotation = states[0].rot;
-            }
-        }
-    }
-
-    [PunRPC]
-    void ResetBallRPC(PhotonMessageInfo info)
-    {
-        cachedRB.velocity = Vector3.zero;
-        cachedTF.position = new Vector3(0, 5, 0);
-    }
-
-    [PunRPC]
-    void ApplyBallForce(Vector3 force)
-    {
-        cachedRB.AddForce(force);
-    }
-
-    void SetForce(float value)
-    {
-        force = value * 100;
-    }
-    #region Helper functions
-    void EnableStateInterpolation()
-    {
-        StateInterpolation = true;
-        syncRigidbody = false;
-        cachedRB.isKinematic = true;
-    }
-
-    void EnableRigidbodySync()
-    {
-        StateInterpolation = false;
-        syncRigidbody = true;
-        if (cachedRB.isKinematic)
-            cachedRB.isKinematic = false;
-        
-    }
-    #endregion 
-
-    #region temp for input should be in inputmanager but still a test project, kinda lazy
-    void KeyBoardInput()
-    {
-        if (Input.GetKeyDown(KeyCode.DownArrow))
-        {
-            photonView.RPC("ApplyBallForce", PhotonTargets.MasterClient, Vector3.down * force);
-        }
-        else if (Input.GetKeyDown(KeyCode.UpArrow))
-        {
-            photonView.RPC("ApplyBallForce", PhotonTargets.MasterClient, Vector3.up * force);
-        }
-        else if (Input.GetKeyDown(KeyCode.LeftArrow))
-        {
-            photonView.RPC("ApplyBallForce", PhotonTargets.MasterClient, Vector3.left * force);
-        }
-        else if (Input.GetKeyDown(KeyCode.RightArrow))
-        {
-            photonView.RPC("ApplyBallForce", PhotonTargets.MasterClient, Vector3.right * force);
-        }
-        else if (Input.GetKeyDown(KeyCode.Space))
-        {
-            photonView.RPC("ResetBallRPC", PhotonTargets.All);
-        }
-    }
-
-    void ClickUpBtn()
-    {
-        photonView.RPC("ApplyBallForce", PhotonTargets.MasterClient, Vector3.up * force);
-    }
-
-    void ClickRightBtn()
-    {
-        photonView.RPC("ApplyBallForce", PhotonTargets.MasterClient, Vector3.right * force);
-    }
-
-    void ClickLeftBtn()
-    {
-        photonView.RPC("ApplyBallForce", PhotonTargets.MasterClient, Vector3.left * force);
-    }
-
-#endregion
 }
