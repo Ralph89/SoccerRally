@@ -9,7 +9,7 @@ public class Game : MonoBehaviour {
         PhotonNetwork.isMessageQueueRunning = true;
         if (PhotonNetwork.isMasterClient)
         {
-            PhotonNetwork.Instantiate("NetworkBall", new Vector3(0, 5, 0), Quaternion.identity, 0);
+            //PhotonNetwork.Instantiate("NetworkBall", new Vector3(0, 5, 0), Quaternion.identity, 0);
         }
 	}
 	
@@ -18,3 +18,4 @@ public class Game : MonoBehaviour {
 	
 	}
 }
+ 

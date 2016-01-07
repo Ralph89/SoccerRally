@@ -223,6 +223,13 @@ public class Ball : Photon.MonoBehaviour {
 
     void ResetBall()
     {
+        if (PhotonNetwork.isMasterClient)
+            photonView.RPC("ResetBallRPC", PhotonTargets.All);
+    }
+
+    [PunRPC]
+    void ResetBallRPC()
+    {
         cachedRB.velocity = Vector3.zero;
         cachedTF.position = new Vector3(0, 5, 0);
     }
@@ -281,7 +288,7 @@ public class Ball : Photon.MonoBehaviour {
         }
         else if (Input.GetKeyDown(KeyCode.Space) && PhotonNetwork.isMasterClient)
         {
-            ResetBall();
+            photonView.RPC("ResetBallRPC", PhotonTargets.All);
         }
     }
 
