@@ -125,6 +125,7 @@ public class Ball : Photon.MonoBehaviour {
                 {
                     offBy = diff;
                     // so the floating point precision is getting to much lets speed up to get it in the right position again lets try to resolve in .5s second
+                    //maybe add a curve so when the diff is low it takes longer then when the diff is high
                     cachedRB.velocity -= (diff * 5);
                 }
                 if (diff.magnitude > 1)

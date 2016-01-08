@@ -34,4 +34,13 @@ public class NetworkManager : Photon.MonoBehaviour
     {
         PhotonNetwork.JoinOrCreateRoom("test", new RoomOptions(), TypedLobby.Default);
     }
+
+    public void OnMasterClientSwitched(PhotonPlayer newMasterPlayer)
+    {
+        if (PhotonNetwork.isMasterClient)
+        {
+            //disable the ui buttons for the master
+            FindObjectOfType<UIManager>().DisableClientButtons();//just a temp ugly call as it's a test project
+        }
+    }
 }

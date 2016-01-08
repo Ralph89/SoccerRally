@@ -35,4 +35,13 @@ public class UIManager : MonoBehaviour {
         leftInput.gameObject.SetActive(true);
         rightInput.gameObject.SetActive(true);
     }
+
+    public void DisableClientButtons()
+    {
+        stateInterpolateButton.gameObject.SetActive(false);
+        rigidbodySyncButton.gameObject.SetActive(false);
+#if UNITY_ANDROID
+        resetBtn.gameObject.SetActive(true);
+#endif
+    }
 }
